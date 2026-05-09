@@ -1,0 +1,1414 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>灵记 V5.0 - 多工作区 + AI版</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+    <style>
+        :root {
+            --bg-color: #E8F5E9;
+            --panel-bg: #F1F8E9;
+            --bar-bg: #E0F0E9;
+            --editor-bg: #C7EDCC;
+            --text-color: #2E3B2F;
+            --accent-color: #2e7d32;
+            --border-color: #C5E1A5;
+            --toolbar-height: 28px;
+            --bottom-height: 24px;
+            --ai-color: #6a1b9a;
+            --ai-bg: #f3e5f5;
+        }
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; user-select: none; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            margin: 0; padding: 0; background-color: var(--bg-color); color: var(--text-color);
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            width: 100%; height: 100dvh; display: flex; flex-direction: column; overflow: hidden;
+        }
+        #mainContainer { flex: 1; position: relative; overflow: hidden; display: flex; height: 100%; }
+
+        /* 工作区选择器 */
+        #workspaceBar {
+            display: flex; align-items: center; padding: 4px 6px;
+            background: var(--bar-bg); border-bottom: 2px solid var(--accent-color);
+            gap: 4px; flex-shrink: 0; z-index: 10;
+        }
+        #workspaceSelect {
+            flex: 1; padding: 4px 8px; border: 1px solid var(--border-color);
+            border-radius: 4px; background: white; font-size: 13px;
+            color: var(--text-color); max-width: 180px; cursor: pointer;
+        }
+        .ws-btn {
+            background: var(--accent-color); color: white; border: none;
+            width: 24px; height: 24px; border-radius: 50%; font-size: 12px;
+            cursor: pointer; display: flex; align-items: center; justify-content: center;
+        }
+        .ws-btn:hover { background: #1B5E20; }
+
+        /* 目录树 */
+        #directoryView {
+            width: 100%; height: 100%; overflow-y: auto;
+            padding: 5px 2px; background-color: var(--bg-color);
+            padding-bottom: 80px; position: absolute; left: 0; top: 0;
+        }
+        .node-item {
+            display: flex; align-items: center; padding: 1px 0; margin-bottom: 0;
+            border-radius: 2px; cursor: pointer; position: relative;
+        }
+        .node-item:active { background-color: rgba(46, 125, 50, 0.1); }
+        .node-item.dragging { opacity: 0.5; background: #C8E6C9; }
+        .drag-top { border-top: 2px solid var(--accent-color); }
+        .drag-bottom { border-bottom: 2px solid var(--accent-color); }
+        .drag-middle { background-color: rgba(46, 125, 50, 0.2); border: 1px dashed var(--accent-color); }
+        #directoryView.drag-over-container { box-shadow: inset 0 0 10px rgba(46, 125, 50, 0.3); }
+        .toggle-icon {
+            width: 16px; height: 16px; display: flex; align-items: center; justify-content: center;
+            color: #7CA37E; transition: transform 0.2s; font-size: 8px; flex-shrink: 0;
+        }
+        .toggle-icon.expanded { transform: rotate(90deg); }
+        .toggle-icon.invisible { visibility: hidden; }
+        .file-icon { font-size: 12px; margin-right: 2px; flex-shrink: 0; opacity: 0.7; color: #558B2F; }
+        .node-title {
+            flex: 1; font-size: 14px; padding: 2px 0; overflow: hidden;
+            text-overflow: ellipsis; white-space: nowrap; line-height: 1.2;
+        }
+        .children-container { display: none; }
+        .children-container.open { display: block; }
+
+        /* 编辑器 */
+        #editorView {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: var(--bg-color); transform: translateX(100%);
+            transition: transform 0.25s cubic-bezier(0.25, 0.8, 0.25, 1);
+            display: flex; flex-direction: column; z-index: 50;
+        }
+        #editorView.active { transform: translateX(0); }
+        .editor-meta-header {
+            padding: 8px 12px; border-bottom: 1px solid var(--border-color);
+            background: var(--bg-color); display: flex; align-items: center;
+        }
+        .back-btn-editor { font-size: 20px; padding-right: 10px; cursor: pointer; color: #558B2F; }
+        #nodeTitleInput { flex: 1; font-size: 18px; font-weight: bold; border: none; outline: none; color: var(--text-color); background: transparent; }
+        #saveStatus { font-size: 10px; color: #8FA390; margin-left: 10px; white-space: nowrap; }
+        .inner-toolbar {
+            height: var(--toolbar-height); background-color: var(--bar-bg);
+            border-bottom: 1px solid var(--border-color); display: flex; align-items: center;
+            padding: 0 4px; gap: 4px; flex-shrink: 0;
+        }
+        .mini-btn {
+            background-color: #A5D6A7; color: #1B5E20; border: none; padding: 0 8px;
+            border-radius: 3px; font-size: 12px; cursor: pointer; height: 20px;
+            display: flex; align-items: center; justify-content: center; transition: background 0.1s;
+        }
+        .mini-btn:hover { background-color: #81C784; }
+        .mini-btn:disabled { background-color: #C8E6C9; opacity: 0.6; color: #999; }
+        #btnFindReplace { background-color: #CFD8DC; color: #455A64; }
+        #btnFindReplace:hover { background-color: #B0BEC5; }
+        /* AI按钮 - V5新增 */
+        #btnAI { background-color: #CE93D8; color: #4A148C; }
+        #btnAI:hover { background-color: #BA68C8; }
+        .mini-setting {
+            display: flex; align-items: center; background: rgba(255,255,255,0.4);
+            border-radius: 3px; padding: 0 4px; border: 1px solid var(--border-color); height: 20px;
+        }
+        .mini-input { width: 50px; border: none; background: transparent; text-align: center; font-size: 11px; padding: 0; color: var(--text-color); }
+        .inner-editor-container { flex: 1; position: relative; overflow: hidden; background: var(--editor-bg); }
+        textarea#mainEditor {
+            width: 100%; height: 100%; resize: none; border: none; outline: none;
+            background-color: var(--editor-bg); color: var(--text-color); font-size: 18px;
+            line-height: 1.8; padding: 15px; box-sizing: border-box;
+            will-change: scroll-position; user-select: text; -webkit-user-select: text;
+        }
+        textarea#mainEditor::selection { background: rgba(102, 187, 106, 0.5); }
+        .inner-bottom-bar {
+            height: var(--bottom-height); background-color: var(--bar-bg);
+            border-top: 1px solid var(--border-color);
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 0 6px; flex-shrink: 0;
+        }
+        .stat-info { font-size: 10px; color: #556b55; min-width: 50px; }
+        .nav-center { display: flex; align-items: center; gap: 4px; }
+        .nav-icon { background: transparent; border: none; font-size: 14px; color: #33691E; padding: 0 5px; cursor: pointer; }
+        select.page-select { background: transparent; border: none; font-size: 11px; font-weight: bold; }
+
+        /* 浮动按钮 */
+        .fab-group { position: fixed; bottom: 30px; right: 20px; display: flex; flex-direction: column; gap: 15px; z-index: 100; }
+        .fab-btn {
+            width: 44px; height: 44px; background: transparent; color: #7CA37E;
+            border-radius: 50%; display: flex; align-items: center; justify-content: center;
+            font-size: 18px; cursor: pointer; border: 1px solid transparent;
+            transition: all 0.2s ease; box-shadow: 0 2px 4px rgba(46, 125, 50, 0.1);
+        }
+        .fab-btn:hover { background: rgba(232,245,233,0.95); color: #2E7D32; transform: scale(1.05); }
+        .fab-btn.drag-hover { background: rgba(211,47,47,0.1); color: #D32F2F; transform: scale(1.1); }
+        #btnAdd { font-size: 19.2px; }
+        #btnMinus { font-size: 28.8px; }
+
+        /* 上下文菜单 */
+        .context-menu {
+            display: none; position: fixed; z-index: 2000; background: var(--panel-bg);
+            border: 1px solid var(--border-color); border-radius: 8px; width: 220px;
+            flex-direction: column; box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+        .menu-item { padding: 12px; font-size: 14px; border-bottom: 1px solid #E0E0E0; cursor: pointer; }
+        .menu-item:last-child { border-bottom: none; }
+        .menu-item:active { background: #DCEDC8; }
+
+        /* 模态框通用 */
+        .modal-overlay {
+            display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,50,0,0.3); z-index: 3000; justify-content: center;
+            align-items: center; padding: 10px;
+        }
+        .modal {
+            background: var(--panel-bg); padding: 20px; border-radius: 10px;
+            width: 85%; max-width: 360px; max-height: 85vh; display: flex;
+            flex-direction: column; box-shadow: 0 10px 30px rgba(0,0,0,0.1); overflow-y: auto;
+        }
+        .btn-full { width: 100%; padding: 10px; border: 1px solid var(--border-color); background: #fff; border-radius: 6px; margin-top: 5px; font-size: 14px; cursor: pointer; }
+        .btn-full:active { background: #F1F8E9; }
+        #loadingOverlay { display: flex; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(240,255,240,0.95); z-index: 9999; justify-content: center; align-items: center; flex-direction: column; color: #2E7D32; font-size: 14px; }
+        #toast { visibility: hidden; min-width: 150px; background: rgba(40,60,40,0.8); color: #fff; text-align: center; border-radius: 50px; padding: 10px 20px; position: fixed; z-index: 4000; left: 50%; bottom: 80px; transform: translateX(-50%); font-size: 12px; opacity: 0; transition: opacity 0.3s; }
+        #toast.show { visibility: visible; opacity: 1; }
+
+        /* 备份列表 */
+        #backupList { list-style: none; padding: 0; margin: 15px 0; max-height: 200px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 5px; }
+        #backupList li { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; border-bottom: 1px solid #E0E0E0; font-size: 13px; }
+        #backupList li:last-child { border-bottom: none; }
+        #backupList li:hover { background-color: #DCEDC8; }
+        .backup-time { color: #556b55; }
+        .btn-restore { background: #A5D6A7; color: #1B5E20; border: none; padding: 4px 8px; border-radius: 3px; cursor: pointer; font-size: 11px; }
+        .backup-io-section { margin-bottom: 20px; }
+        .backup-io-section h4 { margin: 0 0 10px 0; text-align: center; font-size: 16px; }
+        .backup-io-section p { font-size: 12px; color: #888; text-align: center; margin-bottom: 10px; }
+        .backup-io-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 15px; }
+        .backup-io-btn {
+            background: #A5D6A7; color: #1B5E20; border: 1px solid #81C784;
+            border-radius: 6px; padding: 12px 8px; font-size: 13px; cursor: pointer; text-align: center;
+        }
+        .backup-io-btn:hover { background: #81C784; }
+        .backup-io-btn.import-btn { background: #FFB74D; color: white; font-weight: bold; }
+
+        /* 工作区管理 */
+        .ws-list-item {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 10px 12px; border: 1px solid var(--border-color); border-radius: 6px;
+            margin-bottom: 6px; background: white;
+        }
+        .ws-list-item.active { border-color: var(--accent-color); background: #E8F5E9; }
+        .ws-list-item-name { font-size: 14px; font-weight: bold; }
+        .ws-list-item-meta { font-size: 10px; color: #888; }
+        .ws-list-item-actions { display: flex; gap: 4px; }
+        .ws-sm-btn { border: none; padding: 3px 8px; border-radius: 3px; font-size: 11px; cursor: pointer; color: white; }
+        .ws-sm-btn.edit { background: #78909C; }
+        .ws-sm-btn.del { background: #c62828; }
+
+        /* AI相关样式 - V5新增 */
+        .ai-indicator {
+            position: absolute; top: 8px; right: 8px; padding: 4px 10px;
+            background: var(--ai-bg); color: var(--ai-color); border-radius: 12px;
+            font-size: 11px; display: none; z-index: 5;
+        }
+        .ai-indicator.active { display: flex; align-items: center; gap: 4px; }
+        .ai-indicator .spinner {
+            width: 12px; height: 12px; border: 2px solid var(--ai-color);
+            border-top-color: transparent; border-radius: 50%;
+            animation: ai-spin 0.8s linear infinite;
+        }
+        @keyframes ai-spin { to { transform: rotate(360deg); } }
+        .ai-cmd-highlight { background: #f3e5f5; padding: 0 2px; border-radius: 2px; }
+        #aiSettingsModal .setting-row {
+            margin-bottom: 12px;
+        }
+        #aiSettingsModal .setting-label {
+            font-size: 12px; color: #555; margin-bottom: 4px;
+        }
+        #aiSettingsModal .setting-input {
+            width: 100%; padding: 8px; border: 1px solid var(--border-color);
+            border-radius: 4px; font-size: 13px; color: var(--text-color);
+            background: white; box-sizing: border-box;
+        }
+        #aiSettingsModal select.setting-input { cursor: pointer; }
+    </style>
+</head>
+<body>
+
+<div id="mainContainer">
+    <div id="directoryView">
+        <div id="workspaceBar">
+            <select id="workspaceSelect" title="切换工作区"></select>
+            <button class="ws-btn" id="btnWsNew" title="新建工作区">+</button>
+            <button class="ws-btn" id="btnWsManage" title="管理工作区">&#9881;</button>
+        </div>
+        <div id="treeRoot"></div>
+    </div>
+    <div id="editorView">
+        <div class="editor-meta-header">
+            <div class="back-btn-editor" data-action="closeEditor">&#11013;&#65039;</div>
+            <input type="text" id="nodeTitleInput" placeholder="标题...">
+            <div id="saveStatus">已就绪</div>
+        </div>
+        <div class="inner-toolbar">
+            <button class="mini-btn" id="btnUndo" disabled data-action="editorUndo">&#8617;</button>
+            <button class="mini-btn" id="btnRedo" disabled data-action="editorRedo">&#8618;</button>
+            <button class="mini-btn" id="btnFindReplace" data-action="showFindReplaceModal">&#128269;</button>
+            <button class="mini-btn" id="btnAI" data-action="showAIPrompt" title="AI助手">&#129302;</button>
+            <div style="flex-grow:1"></div>
+            <div class="mini-setting">
+                <span style="font-size:9px;color:#558B2F;margin-right:2px;">页字</span>
+                <input type="number" id="pageSize" class="mini-input" value="2200">
+            </div>
+        </div>
+        <div class="inner-editor-container">
+            <textarea id="mainEditor" spellcheck="false" placeholder="双击呼出高级菜单 | 写【指令】@AI触发AI"></textarea>
+            <div class="ai-indicator" id="aiIndicator"><div class="spinner"></div><span>AI处理中...</span></div>
+        </div>
+        <div class="inner-bottom-bar">
+            <div class="stat-info" id="wordCount">0字</div>
+            <div class="nav-center">
+                <button class="nav-icon" data-action="prevPage">&#9664;</button>
+                <select id="pageSelect" class="page-select" data-action="jumpToPage"></select>
+                <button class="nav-icon" data-action="nextPage">&#9654;</button>
+            </div>
+            <div class="stat-info" id="cursorPos">前:0</div>
+        </div>
+    </div>
+</div>
+
+<div class="fab-group">
+    <div class="fab-btn" id="btnV" data-action="handleClickV">v</div>
+    <div class="fab-btn" id="btnAdd" data-action="handleClickAdd">+</div>
+    <div class="fab-btn" id="btnMinus">-</div>
+</div>
+
+<div id="contextMenu" class="context-menu">
+    <div style="padding:8px;font-size:12px;background:#E0F0E9;color:#558B2F;text-align:center;border-bottom:1px solid var(--border-color);">高级功能</div>
+    <div class="menu-item" data-action="execAction" data-param="copyBefore">&#11013; 复制光标前</div>
+    <div class="menu-item" data-action="execAction" data-param="copyAfter">&#10145; 复制光标后</div>
+    <div class="menu-item" data-action="execAction" data-param="moveBeforeToPrev" style="color:#1565c0">&#11014; 前文移至上页</div>
+    <div class="menu-item" data-action="execAction" data-param="moveAfterToNext" style="color:#2e7d32">&#11015; 后文移至下页</div>
+    <div class="menu-item" data-action="execAction" data-param="deleteBefore" style="color:#c62828">删除光标前</div>
+    <div class="menu-item" data-action="execAction" data-param="deleteAfter" style="color:#c62828">删除光标后</div>
+    <div class="menu-item" data-action="showAIPrompt" style="color:var(--ai-color)">&#129302; AI处理选中文字</div>
+    <div class="menu-item" data-action="showCopyToWsModal" style="color:#1565c0">&#128193; 复制到其他工作区</div>
+</div>
+
+<!-- 查找替换 -->
+<div class="modal-overlay" id="findReplaceModal">
+    <div class="modal" style="max-width:350px;">
+        <h4 style="margin:0 0 15px 0;text-align:center;">查找和替换</h4>
+        <div style="display:flex;flex-direction:column;gap:8px;">
+            <input type="text" id="findInput" placeholder="查找内容..." style="padding:8px;border:1px solid #C5E1A5;background:#fff;border-radius:5px;font-size:14px;color:var(--text-color);">
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+                <button class="mini-btn" data-action="findText" style="background:#4CAF50;color:white;height:30px;font-weight:bold;">查找</button>
+                <div id="findResultCount" style="font-size:12px;color:#558B2F;">未开始</div>
+                <div style="display:flex;gap:5px;">
+                    <button class="mini-btn" data-action="navigateMatch" data-param="-1" id="prevMatchBtn" disabled>&#11014;</button>
+                    <button class="mini-btn" data-action="navigateMatch" data-param="1" id="nextMatchBtn" disabled>&#11015;</button>
+                </div>
+            </div>
+            <hr style="border:0;border-top:1px solid #C5E1A5;margin:10px 0;">
+            <input type="text" id="replaceInput" placeholder="替换为..." style="padding:8px;border:1px solid #C5E1A5;background:#fff;border-radius:5px;font-size:14px;color:var(--text-color);">
+            <div style="display:flex;gap:10px;">
+                <button class="btn-full" data-action="replaceOne" style="background:#FFB74D;color:white;border:none;margin:0;padding:8px;">替换当前</button>
+                <button class="btn-full" data-action="replaceAll" style="background:#E57373;color:white;border:none;margin:0;padding:8px;">全部替换</button>
+            </div>
+        </div>
+        <button class="btn-full" style="border:1px solid #C5E1A5;color:#558B2F;background:transparent;margin-top:15px;" data-action="closeModal" data-param="findReplaceModal">关闭</button>
+    </div>
+</div>
+
+<!-- 备份/导入/导出 -->
+<div class="modal-overlay" id="backupIoModal">
+    <div class="modal" style="max-width:400px;max-height:85vh;">
+        <h3 style="margin:0 0 10px 0;text-align:center;">功能总览：备份/导入/导出</h3>
+        <div class="backup-io-section">
+            <h4>备份与恢复</h4>
+            <p>恢复将覆盖当前工作区数据</p>
+            <ul id="backupList"><li>无备份记录...</li></ul>
+            <button class="btn-full" data-action="createManualBackup" style="background:#4CAF50;color:white;border:none;margin-top:10px;">手动保存快照</button>
+        </div>
+        <hr style="border:0;border-top:1px solid #C5E1A5;margin:10px 0;">
+        <div class="backup-io-section">
+            <h4>导入与导出</h4>
+            <p>导入自动创建独立工作区</p>
+            <div class="backup-io-grid">
+                <button class="backup-io-btn import-btn" data-action="triggerImport" data-close="backupIoModal">导入到新工作区</button>
+                <button class="backup-io-btn" data-action="exportManager" data-close="backupIoModal">导出数据</button>
+            </div>
+        </div>
+        <button class="btn-full" style="border:1px solid #C5E1A5;color:#558B2F;background:transparent;margin-top:15px;" data-action="closeModal" data-param="backupIoModal">关闭</button>
+    </div>
+</div>
+
+<!-- 导入选项 -->
+<div class="modal-overlay" id="importSettingModal">
+    <div class="modal">
+        <h3 style="margin:0 0 10px 0;text-align:center;">导入选项</h3>
+        <div style="font-size:12px;color:#666;text-align:center;margin-bottom:10px;" id="importFileName">...</div>
+        <div style="font-size:12px;color:#2e7d32;text-align:center;margin-bottom:10px;" id="importWsName"></div>
+        <div style="display:flex;flex-direction:column;gap:10px;margin:15px 0;">
+            <label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer;"><input type="radio" name="splitMode" value="auto" checked><span><b>智能分割</b> (推荐)</span></label>
+            <label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer;"><input type="radio" name="splitMode" value="none"><span><b>不分割</b> (单页)</span></label>
+        </div>
+        <div style="display:flex;gap:10px;margin-top:15px;">
+            <button class="btn-full" style="background:#2e7d32;color:white;border:none;margin:0;" data-action="confirmImport">确定</button>
+            <button class="btn-full" style="border:1px solid #ddd;margin:0;" data-action="cancelImport">取消</button>
+        </div>
+    </div>
+</div>
+
+<input type="file" id="fileInput" accept=".txt,.html,.md,.docx" style="display:none">
+
+<!-- 导出 -->
+<div class="modal-overlay" id="exportModal">
+    <div class="modal">
+        <h3 style="margin:0 0 15px 0;text-align:center;">导出选项</h3>
+        <button class="btn-full" style="background:#2e7d32;color:white;border:none;" data-action="doExport" data-param="full_app">完整应用包 (推荐)</button>
+        <hr style="border:0;border-top:1px solid #C5E1A5;margin:5px 0 10px 0;">
+        <button class="btn-full" data-action="doExport" data-param="export_current_page">导出当前页 (.txt)</button>
+        <button class="btn-full" data-action="doExport" data-param="export_current_doc">导出当前文档全文 (.txt)</button>
+        <button class="btn-full" data-action="doExport" data-param="export_all_content">导出全部文档 (.txt)</button>
+        <button class="btn-full" style="border:none;color:#888;background:transparent;" data-action="closeModal" data-param="exportModal">取消</button>
+    </div>
+</div>
+
+<!-- 工作区管理 -->
+<div class="modal-overlay" id="workspaceModal">
+    <div class="modal" style="max-width:400px;max-height:85vh;">
+        <h3 style="margin:0 0 10px 0;text-align:center;">工作区管理</h3>
+        <div id="workspaceList"></div>
+        <div style="display:flex;gap:10px;margin-top:15px;">
+            <button class="btn-full" style="background:#2e7d32;color:white;border:none;margin:0;" data-action="createNewWorkspace">新建工作区</button>
+            <button class="btn-full" style="border:1px solid #ddd;margin:0;" data-action="closeModal" data-param="workspaceModal">关闭</button>
+        </div>
+    </div>
+</div>
+
+<!-- 复制到工作区 -->
+<div class="modal-overlay" id="copyToWsModal">
+    <div class="modal" style="max-width:350px;">
+        <h3 style="margin:0 0 10px 0;text-align:center;">复制到其他工作区</h3>
+        <div id="copyToWsList"></div>
+        <button class="btn-full" style="border:1px solid #ddd;margin-top:15px;" data-action="closeModal" data-param="copyToWsModal">取消</button>
+    </div>
+</div>
+
+<!-- 重命名工作区 -->
+<div class="modal-overlay" id="renameWsModal">
+    <div class="modal">
+        <h3 style="margin:0 0 10px 0;text-align:center;">重命名工作区</h3>
+        <input type="text" id="renameWsInput" placeholder="新名称..." style="padding:8px;border:1px solid #C5E1A5;background:#fff;border-radius:5px;font-size:14px;color:var(--text-color);width:100%;box-sizing:border-box;">
+        <div style="display:flex;gap:10px;margin-top:15px;">
+            <button class="btn-full" style="background:#2e7d32;color:white;border:none;margin:0;" data-action="confirmRenameWs">确定</button>
+            <button class="btn-full" style="border:1px solid #ddd;margin:0;" data-action="closeModal" data-param="renameWsModal">取消</button>
+        </div>
+    </div>
+</div>
+
+<!-- V5新增: AI提示词模态框 -->
+<div class="modal-overlay" id="aiPromptModal">
+    <div class="modal" style="max-width:400px;">
+        <h3 style="margin:0 0 10px 0;text-align:center;color:var(--ai-color);">&#129302; AI助手</h3>
+        <div id="aiSelectedPreview" style="display:none;font-size:12px;color:#666;background:#f5f5f5;padding:8px;border-radius:4px;margin-bottom:10px;max-height:80px;overflow-y:auto;word-break:break-all;"></div>
+        <textarea id="aiPromptInput" placeholder="输入AI指令，如：扩写这段话、润色、续写、总结..." style="padding:10px;border:1px solid #CE93D8;background:#fff;border-radius:5px;font-size:14px;color:var(--text-color);width:100%;height:80px;resize:none;box-sizing:border-box;"></textarea>
+        <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
+            <button class="mini-btn" style="background:#CE93D8;color:white;height:26px;" data-action="aiQuickCmd" data-param="扩写">扩写</button>
+            <button class="mini-btn" style="background:#CE93D8;color:white;height:26px;" data-action="aiQuickCmd" data-param="润色优化">润色</button>
+            <button class="mini-btn" style="background:#CE93D8;color:white;height:26px;" data-action="aiQuickCmd" data-param="续写">续写</button>
+            <button class="mini-btn" style="background:#CE93D8;color:white;height:26px;" data-action="aiQuickCmd" data-param="总结归纳">总结</button>
+            <button class="mini-btn" style="background:#CE93D8;color:white;height:26px;" data-action="aiQuickCmd" data-param="起5个标题">起标题</button>
+            <button class="mini-btn" style="background:#CE93D8;color:white;height:26px;" data-action="aiQuickCmd" data-param="翻译成英文">翻译</button>
+        </div>
+        <div style="display:flex;gap:10px;margin-top:15px;">
+            <button class="btn-full" id="aiSendBtn" style="background:var(--ai-color);color:white;border:none;margin:0;" data-action="aiSend">&#9889; 执行</button>
+            <button class="btn-full" style="background:transparent;border:1px solid #ddd;margin:0;" data-action="closeModal" data-param="aiPromptModal">取消</button>
+            <button class="btn-full" style="background:transparent;border:1px solid #CE93D8;color:var(--ai-color);margin:0;" data-action="showAISettings">&#9881; 设置</button>
+        </div>
+    </div>
+</div>
+
+<!-- V5新增: AI设置模态框 -->
+<div class="modal-overlay" id="aiSettingsModal">
+    <div class="modal" style="max-width:400px;">
+        <h3 style="margin:0 0 15px 0;text-align:center;color:var(--ai-color);">&#129302; AI设置</h3>
+        <div class="setting-row">
+            <div class="setting-label">API端点 (Cloudflare Worker地址)</div>
+            <input type="text" id="aiEndpoint" class="setting-input" placeholder="https://your-worker.workers.dev">
+            <div style="font-size:10px;color:#999;margin-top:2px;">部署Worker后填入地址，API Key存在Worker端，不会暴露到前端</div>
+        </div>
+        <div class="setting-row">
+            <div class="setting-label">AI模型</div>
+            <select id="aiModel" class="setting-input">
+                <option value="deepseek-chat">DeepSeek Chat (推荐)</option>
+                <option value="deepseek-reasoner">DeepSeek Reasoner</option>
+                <option value="gpt-4o-mini">GPT-4o Mini</option>
+                <option value="gpt-4o">GPT-4o</option>
+                <option value="claude-3-haiku">Claude 3 Haiku</option>
+            </select>
+        </div>
+        <div class="setting-row">
+            <div class="setting-label">直连API Key (可选，仅测试用)</div>
+            <input type="password" id="aiApiKey" class="setting-input" placeholder="sk-xxx (不建议直连)">
+            <div style="font-size:10px;color:#c62828;margin-top:2px;">&#9888; 直连会暴露Key到前端，强烈建议用Worker代理！</div>
+        </div>
+        <div style="display:flex;gap:10px;margin-top:15px;">
+            <button class="btn-full" style="background:var(--ai-color);color:white;border:none;margin:0;" data-action="saveAISettings">保存设置</button>
+            <button class="btn-full" style="border:1px solid #ddd;margin:0;" data-action="closeModal" data-param="aiSettingsModal">关闭</button>
+        </div>
+    </div>
+</div>
+
+<div id="loadingOverlay"><div style="margin-bottom:10px;" id="loadingText">加载中...</div></div>
+<div id="toast">提示信息</div>
+
+<script>
+/* ================================================================
+   灵记 V5.0 - 多工作区 + AI版
+   
+   Bug修复:
+   #1 字数统计 - 起点中文网标准(汉字1字,标点1字,英文单词1字)
+   #2 字数分页 - splitText改用起点标准字数
+   #3 查找替换 - 替换后正确跳转下一个匹配
+   #4 拖拽排序 - handleDrop的this指向+索引偏移
+   #5 备份导出 - TXT/HTML添加UTF-8 BOM防乱码
+   
+   新功能:
+   - 多工作区隔离管理
+   - @AI内联触发 + 选区AI处理
+   ================================================================ */
+const App = {
+    State: {
+        rootData: [], currentNodeId: null, editorPages: [""], currentEditPageIndex: 0,
+        historyStack: [], historyIndex: -1, lastCursor: 0, isDirty: false,
+        typingTimer: null, pressTimer: null, isLongPress: false,
+        pendingImportFile: null, pendingRawContent: null, pendingImportWsId: null,
+        lastTimeBackupTime: 0, searchMatches: [], currentMatchIndex: -1,
+        draggedNodeId: null, MAX_TIME_BACKUPS: 8, MAX_ACTION_BACKUPS: 8,
+        MIN_BACKUP_INTERVAL: 30000, pageSizeTimer: null, lastPageSizeValue: 2200,
+        workspaces: [], currentWorkspaceId: null, renamingWorkspaceId: null,
+        aiProcessing: false,  // V5 AI状态
+    },
+
+    DB: {
+        DB_NAME: "LingJiDB_V5", DB_VERSION: 4, db: null,
+        async getDB() {
+            if (this.db) return this.db;
+            return new Promise((resolve, reject) => {
+                const req = indexedDB.open(this.DB_NAME, this.DB_VERSION);
+                req.onupgradeneeded = e => {
+                    const d = e.target.result;
+                    if (!d.objectStoreNames.contains('meta')) d.createObjectStore('meta', { keyPath: 'id' });
+                    if (!d.objectStoreNames.contains('contents')) d.createObjectStore('contents', { keyPath: 'id' });
+                    if (!d.objectStoreNames.contains('backups')) d.createObjectStore('backups', { keyPath: 'timestamp' });
+                    if (!d.objectStoreNames.contains('workspaces')) d.createObjectStore('workspaces', { keyPath: 'id' });
+                };
+                req.onsuccess = e => { this.db = e.target.result; resolve(this.db); };
+                req.onerror = e => reject("DB Error");
+            });
+        },
+        async init() { return this.getDB(); },
+        async getWorkspaces() {
+            try {
+                const d = await this.getDB();
+                return new Promise(resolve => {
+                    const tx = d.transaction(['workspaces'], 'readonly');
+                    tx.objectStore('workspaces').getAll().onsuccess = e =>
+                        resolve((e.target.result || []).sort((a,b) => (a.order||0) - (b.order||0)));
+                    tx.onerror = () => resolve([]);
+                });
+            } catch(e) { return []; }
+        },
+        async saveWorkspace(ws) {
+            const d = await this.getDB();
+            return new Promise(resolve => {
+                const tx = d.transaction(['workspaces'], 'readwrite');
+                tx.objectStore('workspaces').put(ws);
+                tx.oncomplete = resolve;
+            });
+        },
+        async deleteWorkspace(id) {
+            const d = await this.getDB();
+            return new Promise(resolve => {
+                const tx = d.transaction(['workspaces'], 'readwrite');
+                tx.objectStore('workspaces').delete(id);
+                tx.oncomplete = resolve;
+            });
+        },
+        async getMeta(wsId) {
+            try {
+                const d = await this.getDB();
+                const key = 'ws_' + wsId + '_tree';
+                return new Promise(resolve => {
+                    const tx = d.transaction(['meta'], 'readonly');
+                    tx.objectStore('meta').get(key).onsuccess = e => resolve(e.target.result ? e.target.result.data : null);
+                    tx.onerror = () => resolve(null);
+                });
+            } catch(e) { return null; }
+        },
+        async saveMeta(data, wsId) {
+            if (!data || !Array.isArray(data)) return;
+            const d = await this.getDB();
+            const key = 'ws_' + wsId + '_tree';
+            return new Promise(resolve => {
+                const tx = d.transaction(['meta'], 'readwrite');
+                tx.objectStore('meta').put({ id: key, data: data });
+                tx.oncomplete = resolve;
+            });
+        },
+        async getContent(id) {
+            try {
+                const d = await this.getDB();
+                return new Promise(resolve => {
+                    const tx = d.transaction(['contents'], 'readonly');
+                    tx.objectStore('contents').get(id).onsuccess = e => resolve(e.target.result ? e.target.result.text : "");
+                });
+            } catch(e) { return ""; }
+        },
+        async saveContent(id, text) {
+            const d = await this.getDB();
+            return new Promise(resolve => {
+                const tx = d.transaction(['contents'], 'readwrite');
+                tx.objectStore('contents').put({ id: id, text: text });
+                tx.oncomplete = resolve;
+            });
+        },
+        async getAllContents() {
+            const d = await this.getDB();
+            return new Promise(resolve => {
+                const tx = d.transaction(['contents'], 'readonly');
+                tx.objectStore('contents').getAll().onsuccess = e => {
+                    const map = {};
+                    if (e.target.result) e.target.result.forEach(i => map[i.id] = i.text);
+                    resolve(map);
+                };
+            });
+        },
+        async importDataBatch(tree, contentMap, wsId) {
+            const d = await this.getDB();
+            const key = 'ws_' + wsId + '_tree';
+            await new Promise(resolve => {
+                const tx = d.transaction(['meta'], 'readwrite');
+                tx.objectStore('meta').put({ id: key, data: tree });
+                tx.oncomplete = resolve;
+            });
+            const keys = Object.keys(contentMap);
+            for (let i = 0; i < keys.length; i += 20) {
+                const chunk = keys.slice(i, i + 20);
+                await new Promise(resolve => {
+                    const tx = d.transaction(['contents'], 'readwrite');
+                    chunk.forEach(k => tx.objectStore('contents').put({ id: k, text: contentMap[k] }));
+                    tx.oncomplete = resolve;
+                });
+            }
+        },
+        async getBackups() {
+            const d = await this.getDB();
+            return new Promise(resolve => {
+                const tx = d.transaction(['backups'], 'readonly');
+                tx.objectStore('backups').getAll().onsuccess = e => resolve(e.target.result || []);
+            });
+        },
+        async saveBackup(tree, contentMap, type, label, wsId) {
+            const d = await this.getDB();
+            const ts = Date.now();
+            const MAX = type === 'time' ? App.State.MAX_TIME_BACKUPS : App.State.MAX_ACTION_BACKUPS;
+            const all = await this.getBackups();
+            const same = all.filter(b => b.type === type && b.workspaceId === wsId);
+            if (same.length >= MAX) {
+                await new Promise(resolve => {
+                    const tx = d.transaction(['backups'], 'readwrite');
+                    const store = tx.objectStore('backups');
+                    same.slice(0, same.length - MAX + 1).forEach(b => store.delete(b.timestamp));
+                    tx.oncomplete = resolve;
+                });
+            }
+            return new Promise(resolve => {
+                const tx = d.transaction(['backups'], 'readwrite');
+                tx.objectStore('backups').put({ timestamp: ts, type, label, workspaceId: wsId, tree, contents: contentMap });
+                tx.oncomplete = () => resolve(ts);
+            });
+        },
+        async loadBackup(timestamp) {
+            const d = await this.getDB();
+            return new Promise(resolve => {
+                const tx = d.transaction(['backups'], 'readonly');
+                tx.objectStore('backups').get(timestamp).onsuccess = e => resolve(e.target.result);
+            });
+        },
+        collectNoteIds(tree) {
+            const ids = [];
+            function walk(list) { list.forEach(n => { ids.push(n.id); if (n.children && n.children.length) walk(n.children); }); }
+            if (tree) walk(tree);
+            return ids;
+        },
+        async deleteContentsBatch(ids) {
+            if (!ids.length) return;
+            const d = await this.getDB();
+            for (let i = 0; i < ids.length; i += 20) {
+                await new Promise(resolve => {
+                    const tx = d.transaction(['contents'], 'readwrite');
+                    ids.slice(i, i + 20).forEach(id => tx.objectStore('contents').delete(id));
+                    tx.oncomplete = resolve;
+                });
+            }
+        }
+    },
+
+    Utils: {
+        uuid() { return Math.random().toString(36).substring(2, 9) + Date.now().toString(36).substring(8, 12); },
+        /* BUG FIX #1: 起点中文网标准字数统计 */
+        countWordsQidian(text) {
+            let count = 0, inWord = false, inNum = false;
+            for (let i = 0; i < text.length; i++) {
+                const c = text[i], code = text.charCodeAt(i);
+                if (c === ' ' || c === '\n' || c === '\r' || c === '\t' || c === '\u3000') { inWord = false; inNum = false; continue; }
+                if ((code >= 65 && code <= 90) || (code >= 97 && code <= 122)) { if (!inWord) { count++; inWord = true; } inNum = false; continue; }
+                if (code >= 48 && code <= 57) { if (!inNum) { count++; inNum = true; } inWord = false; continue; }
+                inWord = false; inNum = false; count++;
+            }
+            return count;
+        },
+        /* BUG FIX #2: 按起点标准字数分页 */
+        splitText(text, wordLimit) {
+            if (wordLimit <= 0) wordLimit = 2200;
+            const pages = []; let current = "", currentWords = 0;
+            for (const line of text.split('\n')) {
+                if (line.includes("==PAGE BREAK==")) { if (current) pages.push(current); current = ""; currentWords = 0; continue; }
+                const lw = this.countWordsQidian(line);
+                if (currentWords + lw > wordLimit && current) {
+                    pages.push(current);
+                    current = lw > wordLimit ? line : line; currentWords = lw;
+                } else { current += (current ? '\n' : '') + line; currentWords += lw; }
+            }
+            if (current || pages.length === 0) pages.push(current);
+            return pages;
+        },
+        findNode(id, list) {
+            list = list || App.State.rootData;
+            for (const n of list) { if (n.id === id) return n; if (n.children && n.children.length) { const f = this.findNode(id, n.children); if (f) return f; } }
+            return null;
+        },
+        removeNode(id, list) {
+            for (let i = 0; i < list.length; i++) { if (list[i].id === id) return list.splice(i, 1)[0]; if (list[i].children && list[i].children.length) { const r = this.removeNode(id, list[i].children); if (r) return r; } }
+            return null;
+        },
+        findParent(id) {
+            function search(list) { for (const n of list) { if (n.id === id) return list; if (n.children && n.children.length) { const f = search(n.children); if (f) return f; } } return null; }
+            return search(App.State.rootData);
+        },
+        collectContentRecursive(list, contentMap) {
+            let txt = "";
+            list.forEach(n => { txt += "\n\n--- [" + n.title + "] ---\n\n" + (contentMap[n.id] || ""); if (n.children && n.children.length) txt += this.collectContentRecursive(n.children, contentMap); });
+            return txt;
+        },
+        isAncestor(ancestorNode, descendantId) {
+            if (!ancestorNode || !ancestorNode.children) return false;
+            return ancestorNode.children.some(c => c.id === descendantId || this.isAncestor(c, descendantId));
+        },
+        download(blob, filename) { const u = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = u; a.download = filename; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(u); },
+        copyTextToClipboard(text, msg) {
+            if (navigator.clipboard) { navigator.clipboard.writeText(text).then(() => App.UI.showToast(msg)).catch(() => App.UI.showToast(msg + "(FB)")); }
+            else { try { const t = document.createElement('textarea'); t.value = text; t.style.cssText = 'position:absolute;left:-9999px'; document.body.appendChild(t); t.select(); document.execCommand('copy'); document.body.removeChild(t); App.UI.showToast(msg); } catch(e) {} }
+        },
+        deepCloneNodeTree(node) {
+            const newId = this.uuid();
+            const cloned = { id: newId, title: node.title, collapsed: node.collapsed || false, children: null };
+            const idMap = { [node.id]: newId };
+            if (node.children && node.children.length) { cloned.children = []; node.children.forEach(c => { const r = this.deepCloneNodeTree(c); cloned.children.push(r.cloned); Object.assign(idMap, r.idMap); }); }
+            return { cloned, idMap };
+        },
+        deepCloneTree(tree) {
+            const idMap = {}; const newTree = tree.map(n => { const r = this.deepCloneNodeTree(n); Object.assign(idMap, r.idMap); return r.cloned; });
+            return { newTree, idMap };
+        }
+    },
+
+    Workspace: {
+        async init() {
+            App.State.workspaces = await App.DB.getWorkspaces();
+            if (App.State.workspaces.length === 0) {
+                const ws = { id: 'ws_default', name: '默认工作区', createdAt: Date.now(), order: 0 };
+                await App.DB.saveWorkspace(ws); App.State.workspaces = [ws];
+                // 迁移旧数据
+                try { const d = await App.DB.getDB(); const old = await new Promise(r => { const tx = d.transaction(['meta'],'readonly'); tx.objectStore('meta').get('root_tree').onsuccess = e => r(e.target.result); }); if (old && old.data && old.data.length > 0) await App.DB.saveMeta(old.data, ws.id); } catch(e) {}
+            }
+            const lastWs = localStorage.getItem('lingji_last_ws');
+            App.State.currentWorkspaceId = (lastWs && App.State.workspaces.some(w => w.id === lastWs)) ? lastWs : App.State.workspaces[0].id;
+            await this.loadCurrentWorkspace();
+            this.renderSelector();
+        },
+        async loadCurrentWorkspace() {
+            App.State.rootData = await App.DB.getMeta(App.State.currentWorkspaceId) || [];
+            App.Tree.render();
+        },
+        async switchWorkspace(wsId) {
+            if (wsId === App.State.currentWorkspaceId) return;
+            await App.Editor.forceSaveContent();
+            await App.DB.saveMeta(App.State.rootData, App.State.currentWorkspaceId);
+            document.getElementById('editorView').classList.remove('active');
+            App.State.currentNodeId = null; App.State.editorPages = [""];
+            App.State.currentWorkspaceId = wsId;
+            localStorage.setItem('lingji_last_ws', wsId);
+            await this.loadCurrentWorkspace();
+            this.renderSelector();
+            App.UI.showToast("已切换: " + this.getCurrentName());
+        },
+        getCurrentName() { const ws = App.State.workspaces.find(w => w.id === App.State.currentWorkspaceId); return ws ? ws.name : '未知'; },
+        async create(name) {
+            const ws = { id: 'ws_' + App.Utils.uuid(), name: name || '新工作区', createdAt: Date.now(), order: App.State.workspaces.length };
+            await App.DB.saveWorkspace(ws); App.State.workspaces.push(ws);
+            await App.DB.saveMeta([], ws.id);
+            this.renderSelector(); return ws;
+        },
+        async rename(wsId, newName) { const ws = App.State.workspaces.find(w => w.id === wsId); if (ws) { ws.name = newName; await App.DB.saveWorkspace(ws); this.renderSelector(); } },
+        async deleteWs(wsId) {
+            if (App.State.workspaces.length <= 1) return App.UI.showToast("至少保留一个工作区");
+            const tree = await App.DB.getMeta(wsId); if (tree) await App.DB.deleteContentsBatch(App.DB.collectNoteIds(tree));
+            await App.DB.deleteWorkspace(wsId);
+            App.State.workspaces = App.State.workspaces.filter(w => w.id !== wsId);
+            if (App.State.currentWorkspaceId === wsId) await this.switchWorkspace(App.State.workspaces[0].id);
+            this.renderSelector(); App.UI.showToast("已删除");
+        },
+        renderSelector() {
+            const s = document.getElementById('workspaceSelect'); s.innerHTML = '';
+            App.State.workspaces.forEach(ws => { const o = document.createElement('option'); o.value = ws.id; o.textContent = ws.name; if (ws.id === App.State.currentWorkspaceId) o.selected = true; s.appendChild(o); });
+        },
+        renderManageList() {
+            const c = document.getElementById('workspaceList'); c.innerHTML = '';
+            App.State.workspaces.forEach(ws => {
+                const d = document.createElement('div'); d.className = 'ws-list-item' + (ws.id === App.State.currentWorkspaceId ? ' active' : '');
+                d.innerHTML = '<div><div class="ws-list-item-name">' + ws.name + (ws.id === App.State.currentWorkspaceId ? ' &#10003;' : '') + '</div><div class="ws-list-item-meta">' + new Date(ws.createdAt).toLocaleDateString('zh-CN') + '</div></div><div class="ws-list-item-actions"><button class="ws-sm-btn edit" data-ws-rename="' + ws.id + '">改名</button><button class="ws-sm-btn del" data-ws-delete="' + ws.id + '">删除</button></div>';
+                c.appendChild(d);
+            });
+        }
+    },
+
+    Tree: {
+        render() { const c = document.getElementById('treeRoot'); if (!c) return; c.innerHTML = ''; App.State.rootData.forEach(n => c.appendChild(this.createNodeEl(n, 0))); },
+        createNodeEl(node, level) {
+            const div = document.createElement('div'), row = document.createElement('div');
+            row.className = 'node-item'; row.draggable = true; row.dataset.id = node.id;
+            row.style.paddingLeft = (level * 8 + 4) + 'px';
+            row.addEventListener('dragstart', () => { App.State.draggedNodeId = node.id; row.classList.add('dragging'); });
+            row.addEventListener('dragend', () => { App.State.draggedNodeId = null; row.classList.remove('dragging'); document.querySelectorAll('.node-item').forEach(el => el.classList.remove('drag-top','drag-bottom','drag-middle')); });
+            row.addEventListener('dragover', this.handleDragOver);
+            row.addEventListener('dragleave', e => e.target.classList.remove('drag-top','drag-bottom','drag-middle'));
+            row.addEventListener('drop', this.handleDrop);
+            const t = document.createElement('div'); t.className = 'toggle-icon';
+            if (!node.children || !node.children.length) t.className += ' invisible';
+            else { t.innerHTML = '&#9654;'; if (!node.collapsed) t.className += ' expanded'; t.onclick = e => { e.stopPropagation(); node.collapsed = !node.collapsed; App.DB.saveMeta(App.State.rootData, App.State.currentWorkspaceId); this.render(); }; }
+            const i = document.createElement('span'); i.className = 'file-icon'; i.innerText = '\uD83D\uDCC4';
+            const tit = document.createElement('div'); tit.className = 'node-title'; tit.innerText = node.title;
+            tit.onclick = () => App.Editor.openEditor(node.id);
+            row.append(t, i, tit); div.appendChild(row);
+            if (node.children && node.children.length && !node.collapsed) { const cc = document.createElement('div'); cc.className = 'children-container open'; node.children.forEach(c => cc.appendChild(this.createNodeEl(c, level+1))); div.appendChild(cc); }
+            return div;
+        },
+        handleDragOver(e) {
+            e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'move';
+            const target = this, tid = target.dataset.id;
+            if (!App.State.draggedNodeId || App.State.draggedNodeId === tid) return;
+            if (App.Utils.isAncestor(App.Utils.findNode(App.State.draggedNodeId), tid)) { document.querySelectorAll('.node-item').forEach(el => el.classList.remove('drag-top','drag-bottom','drag-middle')); return; }
+            document.querySelectorAll('.node-item').forEach(el => el.classList.remove('drag-top','drag-bottom','drag-middle'));
+            const rect = target.getBoundingClientRect(), y = e.clientY - rect.top, b = rect.height * 0.3;
+            if (y < b) target.classList.add('drag-top'); else if (y > rect.height - b) target.classList.add('drag-bottom'); else target.classList.add('drag-middle');
+        },
+        /* BUG FIX #4 */
+        async handleDrop(e) {
+            e.stopPropagation(); const tid = this.dataset.id;
+            if (App.State.draggedNodeId === tid) return;
+            const draggedNode = App.Utils.findNode(App.State.draggedNodeId);
+            if (App.Utils.isAncestor(draggedNode, tid)) { document.querySelectorAll('.node-item').forEach(el => el.classList.remove('drag-top','drag-bottom','drag-middle')); return; }
+            const isMiddle = this.classList.contains('drag-middle'), isTop = this.classList.contains('drag-top');
+            document.querySelectorAll('.node-item').forEach(el => el.classList.remove('drag-top','drag-bottom','drag-middle'));
+            // FIX: 先保存目标信息再移除
+            const targetNode = App.Utils.findNode(tid);
+            const nodeToRemove = App.Utils.removeNode(App.State.draggedNodeId, App.State.rootData);
+            if (!nodeToRemove) return;
+            await App.Backup.saveActionBackup('移动文档前');
+            // FIX: 重新获取目标位置
+            const newParentList = App.Utils.findParent(tid);
+            const newIdx = newParentList.findIndex(n => n.id === tid);
+            if (isMiddle) { if (!targetNode.children) targetNode.children = []; targetNode.children.push(nodeToRemove); targetNode.collapsed = false; }
+            else if (isTop) newParentList.splice(newIdx, 0, nodeToRemove);
+            else newParentList.splice(newIdx + 1, 0, nodeToRemove);
+            await App.DB.saveMeta(App.State.rootData, App.State.currentWorkspaceId);
+            App.Tree.render(); // FIX: 原来是this.render()指向错误
+        },
+        async deleteNodeByDrag() {
+            if (!App.State.draggedNodeId) return;
+            const node = App.Utils.findNode(App.State.draggedNodeId), pl = App.Utils.findParent(App.State.draggedNodeId);
+            if (pl) { const idx = pl.findIndex(n => n.id === App.State.draggedNodeId); if (idx !== -1) { await App.DB.deleteContentsBatch(App.DB.collectNoteIds([node])); pl.splice(idx, 1); await App.DB.saveMeta(App.State.rootData, App.State.currentWorkspaceId); App.Tree.render(); if (App.State.currentNodeId === App.State.draggedNodeId) await App.Editor.closeEditor(); App.UI.showToast("已删除: " + node.title); } }
+            App.State.draggedNodeId = null;
+        },
+        setupDirectoryDrop() {
+            const c = document.getElementById('directoryView');
+            c.addEventListener('dragover', e => { e.preventDefault(); if (!e.target.closest('.node-item') && App.State.draggedNodeId) { e.dataTransfer.dropEffect = 'move'; c.classList.add('drag-over-container'); } else c.classList.remove('drag-over-container'); });
+            c.addEventListener('dragleave', e => { if (!e.relatedTarget || !c.contains(e.relatedTarget)) c.classList.remove('drag-over-container'); });
+            c.addEventListener('drop', async e => { e.preventDefault(); c.classList.remove('drag-over-container'); if (!App.State.draggedNodeId || e.target.closest('.node-item')) return; const n = App.Utils.removeNode(App.State.draggedNodeId, App.State.rootData); if (n) { await App.Backup.saveActionBackup('移至根目录前'); App.State.rootData.push(n); await App.DB.saveMeta(App.State.rootData, App.State.currentWorkspaceId); App.Tree.render(); } });
+        }
+    },
+
+    Editor: {
+        async openEditor(id) {
+            if (App.State.currentNodeId && App.State.currentNodeId !== id) await this.forceSaveContent();
+            await App.Backup.saveTimeBasedBackupIfNecessary();
+            if (App.State.currentNodeId === id) return;
+            App.State.currentNodeId = id; App.State.editorPages = null; App.State.historyStack = []; App.State.historyIndex = -1;
+            const n = App.Utils.findNode(id); if (!n) return;
+            document.getElementById('editorView').classList.add('active');
+            const inp = document.getElementById('nodeTitleInput'); inp.value = n.title;
+            inp.oninput = async function() { n.title = this.value; await App.Backup.saveTimeBasedBackupIfNecessary(); App.DB.saveMeta(App.State.rootData, App.State.currentWorkspaceId); App.Tree.render(); };
+            const editor = document.getElementById('mainEditor'); editor.value = "Loading...";
+            const full = await App.DB.getContent(id);
+            let size = parseInt(document.getElementById('pageSize').value) || 2200;
+            if (full.length > 50000 && size > 50000) { size = 2200; document.getElementById('pageSize').value = 2200; }
+            App.State.editorPages = App.Utils.splitText(full, size); App.State.currentEditPageIndex = 0; this.loadPage(0);
+        },
+        async closeEditor() { await this.forceSaveContent(); await App.Backup.saveTimeBasedBackupIfNecessary(); document.getElementById('editorView').classList.remove('active'); App.State.currentNodeId = null; },
+        loadPage(index) {
+            if (index < 0 || index >= App.State.editorPages.length) return;
+            App.State.currentEditPageIndex = index;
+            const editor = document.getElementById('mainEditor'); editor.value = App.State.editorPages[index];
+            this.updateUI(); App.State.historyStack = []; App.State.historyIndex = -1; this.pushHistory(editor.value); App.State.isDirty = false; editor.focus();
+        },
+        updateUI() {
+            const ps = document.getElementById('pageSelect'); ps.innerHTML = '';
+            for (let i = 0; i < App.State.editorPages.length; i++) { const o = document.createElement('option'); o.value = i; o.innerText = "第" + (i+1) + "页/共" + App.State.editorPages.length + "页"; ps.appendChild(o); }
+            ps.value = App.State.currentEditPageIndex; this.updateStats();
+        },
+        /* BUG FIX #1 */
+        updateStats() {
+            const editor = document.getElementById('mainEditor'); if (!editor) return;
+            const text = editor.value, words = App.Utils.countWordsQidian(text), chars = text.replace(/[\s\r\n]+/g,'').length;
+            App.UI.setText('wordCount', words + "字(" + chars + "符)");
+            const pos = document.activeElement === editor ? editor.selectionStart : App.State.lastCursor;
+            App.UI.setText('cursorPos', "前:" + pos);
+        },
+        prevPage() { if (App.State.currentEditPageIndex > 0) { const e = document.getElementById('mainEditor'); App.State.editorPages[App.State.currentEditPageIndex] = e.value; this.loadPage(App.State.currentEditPageIndex - 1); } },
+        nextPage() { if (App.State.currentEditPageIndex < App.State.editorPages.length - 1) { const e = document.getElementById('mainEditor'); App.State.editorPages[App.State.currentEditPageIndex] = e.value; this.loadPage(App.State.currentEditPageIndex + 1); } },
+        jumpToPage() { const i = parseInt(document.getElementById('pageSelect').value); if (i !== App.State.currentEditPageIndex) { const e = document.getElementById('mainEditor'); App.State.editorPages[App.State.currentEditPageIndex] = e.value; this.loadPage(i); } },
+        async reformatBook() {
+            if (!App.State.currentNodeId) return; await this.forceSaveContent();
+            const full = App.State.editorPages.join("\n\n==PAGE BREAK==\n\n");
+            let size = parseInt(document.getElementById('pageSize').value) || 2200; if (size <= 0) size = 2200;
+            App.State.editorPages = App.Utils.splitText(full, size); this.loadPage(0); App.UI.showToast("已重排");
+        },
+        pushHistory(val) {
+            if (App.State.historyStack.length && App.State.historyStack[App.State.historyIndex] === val) return;
+            const MAX = val.length > 20000 ? 10 : 30;
+            if (App.State.historyIndex < App.State.historyStack.length-1) App.State.historyStack = App.State.historyStack.slice(0, App.State.historyIndex+1);
+            App.State.historyStack.push(val); App.State.historyIndex++;
+            while (App.State.historyStack.length > MAX) { App.State.historyStack.shift(); App.State.historyIndex--; }
+            document.getElementById('btnUndo').disabled = App.State.historyIndex <= 0;
+            document.getElementById('btnRedo').disabled = true;
+        },
+        async editorUndo() {
+            if (App.State.historyIndex > 0) { App.State.historyIndex--; const v = App.State.historyStack[App.State.historyIndex]; if (typeof v === 'string') { const e = document.getElementById('mainEditor'); e.value = v; App.State.editorPages[App.State.currentEditPageIndex] = v; App.State.isDirty = true; } }
+            document.getElementById('btnUndo').disabled = App.State.historyIndex <= 0;
+            document.getElementById('btnRedo').disabled = App.State.historyIndex >= App.State.historyStack.length - 1;
+            this.updateStats(); await this.forceSaveContent();
+        },
+        async editorRedo() {
+            if (App.State.historyIndex < App.State.historyStack.length - 1) { App.State.historyIndex++; const v = App.State.historyStack[App.State.historyIndex]; if (typeof v === 'string') { const e = document.getElementById('mainEditor'); e.value = v; App.State.editorPages[App.State.currentEditPageIndex] = v; App.State.isDirty = true; } }
+            document.getElementById('btnUndo').disabled = App.State.historyIndex <= 0;
+            document.getElementById('btnRedo').disabled = App.State.historyIndex >= App.State.historyStack.length - 1;
+            this.updateStats(); await this.forceSaveContent();
+        },
+        async forceSaveContent() {
+            if (App.State.isDirty && App.State.currentNodeId && App.State.editorPages) {
+                const e = document.getElementById('mainEditor'); App.State.editorPages[App.State.currentEditPageIndex] = e.value;
+                await App.DB.saveContent(App.State.currentNodeId, App.State.editorPages.join("\n\n==PAGE BREAK==\n\n"));
+                App.State.isDirty = false; App.UI.setText('saveStatus', "已保存");
+            }
+        },
+        cutPrecedingText(cut=false) {
+            const e = document.getElementById('mainEditor'), start = e.selectionStart, text = e.value.substring(0, start);
+            if (text) { if (!cut) App.Utils.copyTextToClipboard(text, "已复制前文"); if (cut) { App.Backup.saveActionBackup('删除前文前'); this.pushHistory(e.value); e.value = e.value.substring(start); e.selectionStart = e.selectionEnd = 0; App.State.isDirty = true; } }
+            e.focus();
+        },
+        cutFollowingText(cut=false) {
+            const e = document.getElementById('mainEditor'), cursor = e.selectionEnd, text = e.value.substring(cursor);
+            if (text) { if (!cut) App.Utils.copyTextToClipboard(text, "已复制后文"); if (cut) { App.Backup.saveActionBackup('删除后文前'); this.pushHistory(e.value); e.value = e.value.substring(0, e.selectionStart); e.selectionStart = e.selectionEnd = e.selectionStart; App.State.isDirty = true; } }
+            e.focus();
+        },
+        async movePrecedingToPrevPage() {
+            if (!App.State.currentNodeId || App.State.currentEditPageIndex === 0) return;
+            const e = document.getElementById('mainEditor'), cur = e.selectionStart, pre = e.value.substring(0, cur);
+            if (!pre) return App.UI.showToast("光标前无内容");
+            App.State.editorPages[App.State.currentEditPageIndex] = e.value.substring(cur).trimStart();
+            App.State.editorPages[App.State.currentEditPageIndex - 1] = (App.State.editorPages[App.State.currentEditPageIndex - 1] || '').trimEnd() + '\n\n' + pre.trimEnd();
+            this.loadPage(App.State.currentEditPageIndex - 1); App.State.isDirty = true; await this.forceSaveContent();
+        },
+        async moveFollowingToNextPage() {
+            if (!App.State.currentNodeId || App.State.currentEditPageIndex === App.State.editorPages.length - 1) return;
+            const e = document.getElementById('mainEditor'), cur = e.selectionEnd, post = e.value.substring(cur);
+            if (!post) return App.UI.showToast("光标后无内容");
+            App.State.editorPages[App.State.currentEditPageIndex] = e.value.substring(0, cur).trimEnd();
+            App.State.editorPages[App.State.currentEditPageIndex + 1] = post.trimStart() + '\n\n' + (App.State.editorPages[App.State.currentEditPageIndex + 1] || '');
+            this.loadPage(App.State.currentEditPageIndex + 1); App.State.isDirty = true; await this.forceSaveContent();
+        },
+        execAction(action) {
+            document.getElementById('contextMenu').style.display = 'none';
+            if (App.State.currentNodeId) { const e = document.getElementById('mainEditor'); App.State.editorPages[App.State.currentEditPageIndex] = e.value; App.State.isDirty = true; }
+            switch(action) {
+                case 'copyBefore': this.cutPrecedingText(false); break; case 'copyAfter': this.cutFollowingText(false); break;
+                case 'deleteBefore': this.cutPrecedingText(true); break; case 'deleteAfter': this.cutFollowingText(true); break;
+                case 'moveBeforeToPrev': this.movePrecedingToPrevPage(); break; case 'moveAfterToNext': this.moveFollowingToNextPage(); break;
+            }
+        },
+        /* BUG FIX #3 */
+        findText() {
+            const q = document.getElementById('findInput').value; App.State.searchMatches = []; App.State.currentMatchIndex = -1;
+            if (q.length > 0) { const t = document.getElementById('mainEditor').value; let s = 0; while (true) { const m = t.indexOf(q, s); if (m === -1) break; App.State.searchMatches.push({start:m, end:m+q.length}); s = m + q.length; } if (App.State.searchMatches.length > 0) App.State.currentMatchIndex = 0; }
+            this.updateFindResultUI();
+        },
+        updateFindResultUI() {
+            App.UI.setText('findResultCount', App.State.searchMatches.length > 0 ? (App.State.currentMatchIndex+1) + "/" + App.State.searchMatches.length : '未找到');
+            document.getElementById('prevMatchBtn').disabled = !App.State.searchMatches.length;
+            document.getElementById('nextMatchBtn').disabled = !App.State.searchMatches.length;
+            if (App.State.searchMatches.length > 0 && App.State.currentMatchIndex >= 0) { const m = App.State.searchMatches[App.State.currentMatchIndex]; const e = document.getElementById('mainEditor'); e.focus(); e.setSelectionRange(m.start, m.end); }
+        },
+        navigateMatch(dir) { if (!App.State.searchMatches.length) return; App.State.currentMatchIndex += dir; if (App.State.currentMatchIndex < 0) App.State.currentMatchIndex = App.State.searchMatches.length - 1; if (App.State.currentMatchIndex >= App.State.searchMatches.length) App.State.currentMatchIndex = 0; this.updateFindResultUI(); },
+        replaceOne() {
+            if (!App.State.searchMatches.length || App.State.currentMatchIndex === -1) return App.UI.showToast("请先查找");
+            const q = document.getElementById('findInput').value, r = document.getElementById('replaceInput').value;
+            if (!q) return; const m = App.State.searchMatches[App.State.currentMatchIndex], e = document.getElementById('mainEditor');
+            App.Backup.saveActionBackup('替换单个前'); this.pushHistory(e.value);
+            e.value = e.value.substring(0, m.start) + r + e.value.substring(m.end); App.State.isDirty = true;
+            this.findText();
+            if (App.State.searchMatches.length > 0) { let ni = App.State.searchMatches.findIndex(x => x.start >= m.start + r.length); if (ni === -1) ni = 0; App.State.currentMatchIndex = ni; this.updateFindResultUI(); }
+            App.UI.showToast("替换成功");
+        },
+        replaceAll() {
+            const q = document.getElementById('findInput').value, r = document.getElementById('replaceInput').value;
+            if (!q) return; if (!confirm("全部替换 '" + q + "' → '" + r + "'?")) return;
+            App.Backup.saveActionBackup('替换全部前');
+            const e = document.getElementById('mainEditor'); e.value = e.value.split(q).join(r); App.State.isDirty = true;
+            this.pushHistory(e.value); App.State.searchMatches = []; App.State.currentMatchIndex = -1; this.updateFindResultUI();
+            App.UI.showToast("全部替换成功");
+        },
+        /* V5新增: @AI内联触发检测 */
+        checkAITrigger() {
+            const editor = document.getElementById('mainEditor');
+            const text = editor.value;
+            const cursorPos = editor.selectionStart;
+            // 检测【...】@AI模式
+            const pattern = /【([^】]+)】@AI/g;
+            let match;
+            while ((match = pattern.exec(text)) !== null) {
+                const cmdStart = match.index;
+                const cmdEnd = match.index + match[0].length;
+                // 光标刚打完@AI（光标在标记结尾或结尾附近）
+                if (cursorPos >= cmdEnd - 2 && cursorPos <= cmdEnd + 1) {
+                    const command = match[1];
+                    // 获取上下文(标记前的文字)
+                    const contextStart = Math.max(0, cmdStart - 500);
+                    const context = text.substring(contextStart, cmdStart);
+                    // 触发AI
+                    this.triggerAI(command, context, 'inline', cmdStart, cmdEnd);
+                    return true;
+                }
+            }
+            return false;
+        },
+        /* V5新增: 触发AI处理 */
+        async triggerAI(command, selectedText, mode, replaceStart, replaceEnd) {
+            const aiSettings = App.AI.getSettings();
+            if (!aiSettings.endpoint && !aiSettings.apiKey) {
+                App.UI.showToast("请先配置AI设置");
+                App.UI.show('aiSettingsModal', true);
+                return;
+            }
+            if (App.State.aiProcessing) return App.UI.showToast("AI正在处理中...");
+            App.State.aiProcessing = true;
+            document.getElementById('aiIndicator').classList.add('active');
+            App.UI.closeModal('aiPromptModal');
+
+            try {
+                const editor = document.getElementById('mainEditor');
+                let systemPrompt = "你是一个专业的中文写作助手。根据用户的指令处理给定的文字内容。只输出处理结果，不要加任何解释说明。如果是指令类任务(如起标题)，直接输出结果，每行一个。";
+                let userPrompt = "";
+                if (selectedText && selectedText.trim()) {
+                    userPrompt = "原文内容：\n" + selectedText + "\n\n指令：" + command;
+                } else {
+                    userPrompt = "指令：" + command;
+                    // 如果有当前文档内容作为上下文
+                    const fullText = App.State.editorPages ? App.State.editorPages.join("\n") : "";
+                    if (fullText && !selectedText) {
+                        userPrompt += "\n\n当前文档内容（供参考）：\n" + fullText.substring(0, 3000);
+                    }
+                }
+
+                const requestBody = {
+                    model: aiSettings.model || "deepseek-chat",
+                    messages: [
+                        { role: "system", content: systemPrompt },
+                        { role: "user", content: userPrompt }
+                    ],
+                    max_tokens: 2000,
+                    temperature: 0.7
+                };
+
+                let response;
+                if (aiSettings.endpoint) {
+                    // 通过Worker代理
+                    response = await fetch(aiSettings.endpoint, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(requestBody)
+                    });
+                } else if (aiSettings.apiKey) {
+                    // 直连(仅测试用)
+                    const baseUrl = (aiSettings.model || '').startsWith('gpt') ? 'https://api.openai.com/v1' :
+                                    (aiSettings.model || '').startsWith('claude') ? 'https://api.anthropic.com/v1' :
+                                    'https://api.deepseek.com/v1';
+                    response = await fetch(baseUrl + '/chat/completions', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + aiSettings.apiKey },
+                        body: JSON.stringify(requestBody)
+                    });
+                }
+
+                if (!response || !response.ok) throw new Error("AI请求失败: " + (response ? response.status : '无响应'));
+                const data = await response.json();
+                const result = data.choices && data.choices[0] && data.choices[0].message ? data.choices[0].message.content.trim() : "AI未返回有效结果";
+
+                // 将结果插入编辑器
+                this.pushHistory(editor.value);
+                if (mode === 'inline' && typeof replaceStart === 'number') {
+                    // 替换【指令】@AI标记为结果
+                    editor.value = editor.value.substring(0, replaceStart) + result + editor.value.substring(replaceEnd);
+                    editor.selectionStart = editor.selectionEnd = replaceStart + result.length;
+                } else if (mode === 'selection' && typeof replaceStart === 'number') {
+                    // 替换选中文字
+                    editor.value = editor.value.substring(0, replaceStart) + result + editor.value.substring(replaceEnd);
+                    editor.selectionStart = editor.selectionEnd = replaceStart + result.length;
+                } else {
+                    // 在光标位置插入
+                    const pos = editor.selectionStart;
+                    editor.value = editor.value.substring(0, pos) + '\n' + result + '\n' + editor.value.substring(pos);
+                    editor.selectionStart = editor.selectionEnd = pos + result.length + 2;
+                }
+                App.State.editorPages[App.State.currentEditPageIndex] = editor.value;
+                App.State.isDirty = true;
+                this.updateStats();
+                await this.forceSaveContent();
+                App.UI.showToast("AI处理完成");
+            } catch (err) {
+                console.error("AI Error:", err);
+                App.UI.showToast("AI处理失败: " + err.message);
+            } finally {
+                App.State.aiProcessing = false;
+                document.getElementById('aiIndicator').classList.remove('active');
+            }
+        }
+    },
+
+    /* V5新增: AI模块 */
+    AI: {
+        getSettings() {
+            return {
+                endpoint: localStorage.getItem('lingji_ai_endpoint') || '',
+                model: localStorage.getItem('lingji_ai_model') || 'deepseek-chat',
+                apiKey: localStorage.getItem('lingji_ai_key') || ''
+            };
+        },
+        saveSettings(endpoint, model, apiKey) {
+            localStorage.setItem('lingji_ai_endpoint', endpoint);
+            localStorage.setItem('lingji_ai_model', model);
+            localStorage.setItem('lingji_ai_key', apiKey);
+            App.UI.showToast("AI设置已保存");
+            App.UI.closeModal('aiSettingsModal');
+        },
+        loadSettingsToUI() {
+            const s = this.getSettings();
+            document.getElementById('aiEndpoint').value = s.endpoint;
+            document.getElementById('aiModel').value = s.model;
+            document.getElementById('aiApiKey').value = s.apiKey;
+        },
+        showPromptModal(mode) {
+            const editor = document.getElementById('mainEditor');
+            const preview = document.getElementById('aiSelectedPreview');
+            if (mode === 'selection') {
+                const sel = editor.value.substring(editor.selectionStart, editor.selectionEnd);
+                if (sel) {
+                    preview.style.display = 'block';
+                    preview.textContent = '选中文字: ' + (sel.length > 100 ? sel.substring(0, 100) + '...' : sel);
+                } else {
+                    preview.style.display = 'none';
+                }
+            } else {
+                preview.style.display = 'none';
+            }
+            document.getElementById('aiPromptInput').value = '';
+            App.UI.show('aiPromptModal', true);
+            setTimeout(() => document.getElementById('aiPromptInput').focus(), 100);
+        },
+        async send() {
+            const editor = document.getElementById('mainEditor');
+            const command = document.getElementById('aiPromptInput').value.trim();
+            if (!command) return App.UI.showToast("请输入AI指令");
+
+            // 检查是否有选中文字
+            const selStart = editor.selectionStart;
+            const selEnd = editor.selectionEnd;
+            const selectedText = editor.value.substring(selStart, selEnd);
+
+            let mode = 'insert';
+            let replaceStart, replaceEnd;
+            if (selectedText) {
+                mode = 'selection';
+                replaceStart = selStart;
+                replaceEnd = selEnd;
+            }
+            await App.Editor.triggerAI(command, selectedText, mode, replaceStart, replaceEnd);
+        }
+    },
+
+    Backup: {
+        async createManualBackup() {
+            App.UI.setText('loadingText', "创建备份..."); App.UI.show('loadingOverlay', true);
+            try { await App.Editor.forceSaveContent(); const cm = await App.DB.getAllContents(); const ts = await App.DB.saveBackup(App.State.rootData, cm, 'action', '手动备份', App.State.currentWorkspaceId); App.UI.closeModal('backupIoModal'); App.UI.showToast("备份已创建"); await this.showBackupIoModal(); }
+            catch(e) { alert("备份失败: " + e.message); } finally { App.UI.show('loadingOverlay', false); }
+        },
+        async showBackupIoModal() {
+            const backups = await App.DB.getBackups();
+            const wsBk = backups.filter(b => b.workspaceId === App.State.currentWorkspaceId || !b.workspaceId);
+            const ul = document.getElementById('backupList'); ul.innerHTML = '';
+            if (!wsBk.length) ul.innerHTML = '<li>当前工作区无备份</li>';
+            else { wsBk.sort((a,b) => b.timestamp - a.timestamp); wsBk.forEach(b => { const li = document.createElement('li'); const d = new Date(b.timestamp).toLocaleString('zh-CN',{hour12:false}); li.innerHTML = '<span class="backup-time">' + d + ' (' + (b.type==='time'?'自动':'事件') + ')</span><button class="btn-restore" data-action="loadAndRestoreBackup" data-timestamp="' + b.timestamp + '">恢复</button>'; ul.appendChild(li); }); }
+            App.UI.show('backupIoModal', true);
+        },
+        async loadAndRestoreBackup(timestamp) {
+            try { const b = await App.DB.loadBackup(timestamp); if (!b) throw new Error("备份不存在"); await this.saveActionBackup('恢复前'); await App.DB.importDataBatch(b.tree, b.contents, App.State.currentWorkspaceId); App.State.rootData = b.tree; App.UI.closeModal('backupIoModal'); await App.Editor.closeEditor(); App.Tree.render(); App.UI.showToast("恢复成功"); }
+            catch(e) { alert("恢复失败: " + e.message); }
+        },
+        async saveTimeBasedBackupIfNecessary() { if (Date.now() - App.State.lastTimeBackupTime < App.State.MIN_BACKUP_INTERVAL || App.State.isDirty) return; const cm = await App.DB.getAllContents(); if (!Object.keys(cm).length && !App.State.rootData.length) return; App.State.lastTimeBackupTime = await App.DB.saveBackup(App.State.rootData, cm, 'time', '自动备份', App.State.currentWorkspaceId); },
+        async saveActionBackup(label) { await App.Editor.forceSaveContent(); const cm = await App.DB.getAllContents(); if (!Object.keys(cm).length && !App.State.rootData.length) return; await App.DB.saveBackup(App.State.rootData, cm, 'action', label, App.State.currentWorkspaceId); }
+    },
+
+    ImportExport: {
+        async createNewNode() {
+            await App.Editor.forceSaveContent(); await App.Backup.saveTimeBasedBackupIfNecessary();
+            const nn = { id: App.Utils.uuid(), title: '新文档', collapsed: false, children: null };
+            await App.Backup.saveActionBackup('创建文档前');
+            if (App.State.currentNodeId) { const pl = App.Utils.findParent(App.State.currentNodeId); if (pl) { pl.splice(pl.findIndex(n=>n.id===App.State.currentNodeId)+1, 0, nn); } else App.State.rootData.push(nn); } else App.State.rootData.push(nn);
+            await App.DB.saveMeta(App.State.rootData, App.State.currentWorkspaceId); App.Tree.render();
+            await App.DB.saveContent(nn.id, '点击此处开始写作...'); App.Editor.openEditor(nn.id);
+        },
+        async doExport(type) {
+            App.UI.closeModal('exportModal'); App.UI.show('loadingOverlay', true);
+            try {
+                if (type === 'full_app') {
+                    await App.Editor.forceSaveContent(); const cm = await App.DB.getAllContents();
+                    const wsName = App.Workspace.getCurrentName();
+                    const bd = JSON.stringify({ tree: App.State.rootData, contents: cm, workspaceName: wsName }).replace(/<\//g, '<\\/');
+                    const html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>' + wsName + ' - 灵记备份</title></head><body><h2>灵记备份</h2><p>工作区:' + wsName + '</p><p>' + new Date().toLocaleString() + '</p><p>文档数:' + App.State.rootData.length + '</p><hr><p>请在灵记V5中导入此文件</p><script>var BD=' + bd + ';</' + 'script></body></html>';
+                    App.Utils.download(new Blob(['\uFEFF' + html], {type:'text/html;charset=utf-8'}), wsName + "_备份.html");
+                    App.UI.showToast("导出成功"); return;
+                }
+                let txt = "", name = "export.txt"; const cm = type !== 'export_current_page' ? await App.DB.getAllContents() : {};
+                if (type === 'export_current_page') { if (App.State.currentNodeId) { const n = App.Utils.findNode(App.State.currentNodeId); txt = App.State.editorPages[App.State.currentEditPageIndex] || ""; name = n.title + "_页.txt"; } }
+                else if (type === 'export_current_doc') { if (!App.State.currentNodeId) throw new Error("请先打开文档"); txt = App.State.editorPages.join("\n\n==PAGE BREAK==\n\n"); name = App.Utils.findNode(App.State.currentNodeId).title + "_全文.txt"; }
+                else if (type === 'export_all_content') { txt = App.Utils.collectContentRecursive(App.State.rootData, cm); name = App.Workspace.getCurrentName() + "_全部.txt"; }
+                App.Utils.download(new Blob(['\uFEFF' + txt], {type:'text/plain;charset=utf-8'}), name);
+                App.UI.showToast("导出成功");
+            } catch(e) { alert("导出失败: " + e.message); } finally { App.UI.show('loadingOverlay', false); }
+        },
+        triggerImport() { document.getElementById('fileInput').click(); },
+        async confirmImport() {
+            App.UI.closeModal('importSettingModal');
+            if (!App.State.pendingImportFile || App.State.pendingRawContent === null) return;
+            const content = App.State.pendingRawContent, wsId = App.State.pendingImportWsId;
+            const splitMode = document.querySelector('input[name="splitMode"]:checked').value;
+            App.UI.show('loadingOverlay', true);
+            try {
+                let treeData = [], contentMap = {};
+                const pageSize = parseInt(document.getElementById('pageSize').value) || 2200;
+                const title = App.State.pendingImportFile.name.replace(/\.(txt|md|html|docx)$/i, '');
+                if (splitMode === 'auto') {
+                    const lines = content.split('\n'), result = []; let cur = { title: (lines[0]||title).trim(), content: [] };
+                    for (let i = 0; i < lines.length; i++) { const l = lines[i], t = l.trim(); if (i > 0 && t && (t.match(/^#+\s/) || (t.length < 50 && t.match(/第.+[章节回卷]/)))) { result.push(cur); cur = { title: t.replace(/^#+\s/,'').trim(), content: [] }; } else if (i > 0) cur.content.push(l); }
+                    result.push(cur);
+                    for (const doc of result) { if (!doc.content.join('').trim() && result.length > 1) continue; const id = App.Utils.uuid(); treeData.push({id, title: doc.title || '未命名', collapsed: true, children: null}); contentMap[id] = App.Utils.splitText(doc.content.join('\n'), pageSize).join("\n\n==PAGE BREAK==\n\n"); if (treeData.length >= 50) break; }
+                } else { const id = App.Utils.uuid(); treeData.push({id, title, collapsed: true, children: null}); contentMap[id] = content; }
+                await App.DB.importDataBatch(treeData, contentMap, wsId);
+                await App.Workspace.switchWorkspace(wsId);
+                App.UI.showToast("导入成功(" + treeData.length + "个文档)");
+            } catch(e) { alert("导入失败: " + e.message); } finally { App.UI.show('loadingOverlay', false); App.State.pendingImportFile = null; App.State.pendingRawContent = null; App.State.pendingImportWsId = null; }
+        },
+        cancelImport() { if (App.State.pendingImportWsId) { App.DB.deleteWorkspace(App.State.pendingImportWsId); App.State.workspaces = App.State.workspaces.filter(w => w.id !== App.State.pendingImportWsId); App.Workspace.renderSelector(); } App.State.pendingImportFile = null; App.State.pendingRawContent = null; App.State.pendingImportWsId = null; App.UI.closeModal('importSettingModal'); }
+    },
+
+    UI: {
+        setText(id, txt) { const e = document.getElementById(id); if (e) e.innerText = txt; },
+        show(id, show) { const e = document.getElementById(id); if (e) e.style.display = show ? 'flex' : 'none'; },
+        closeModal(id) { const m = document.getElementById(id); if (m) m.style.display = 'none'; if (id === 'findReplaceModal') { const e = document.getElementById('mainEditor'); if (e) e.focus(); } },
+        showToast(msg) { const t = document.getElementById("toast"); this.setText('toast', msg); t.className = "show"; setTimeout(() => t.className = t.className.replace("show",""), 3000); },
+        exportManager() { this.show('exportModal', true); },
+        showFindReplaceModal() { App.Backup.saveTimeBasedBackupIfNecessary(); this.show('findReplaceModal', true); setTimeout(() => document.getElementById('findInput').focus(), 100); },
+        showCopyToWsModal() {
+            document.getElementById('contextMenu').style.display = 'none';
+            if (!App.State.currentNodeId) return;
+            const c = document.getElementById('copyToWsList'); c.innerHTML = '';
+            App.State.workspaces.filter(w => w.id !== App.State.currentWorkspaceId).forEach(ws => {
+                const d = document.createElement('div'); d.className = 'ws-list-item'; d.style.cursor = 'pointer';
+                d.innerHTML = '<div class="ws-list-item-name">' + ws.name + '</div>';
+                d.onclick = async () => { await App.Actions.copyNoteToWorkspace(App.State.currentNodeId, ws.id); App.UI.closeModal('copyToWsModal'); };
+                c.appendChild(d);
+            });
+            if (!c.children.length) c.innerHTML = '<div style="text-align:center;color:#888;padding:20px;">没有其他工作区</div>';
+            this.show('copyToWsModal', true);
+        }
+    },
+
+    Actions: {
+        async handleClickV(isLong) { if (isLong) await App.Backup.showBackupIoModal(); else if (!App.State.isLongPress) await App.ImportExport.doExport('full_app'); },
+        async handleClickAdd(isLong) { if (!App.State.isLongPress) await App.ImportExport.createNewNode(); },
+        startPress(cb) { App.State.isLongPress = false; if (App.State.pressTimer) clearTimeout(App.State.pressTimer); App.State.pressTimer = setTimeout(() => { App.State.isLongPress = true; cb(true); }, 600); },
+        endPress() { if (App.State.pressTimer) clearTimeout(App.State.pressTimer); },
+        async copyNoteToWorkspace(noteId, targetWsId) {
+            const node = App.Utils.findNode(noteId); if (!node) return;
+            await App.Editor.forceSaveContent();
+            const { newTree, idMap } = App.Utils.deepCloneTree([node]);
+            const cm = {}; async function copy(n) { const nid = idMap[n.id]; if (nid) { const t = await App.DB.getContent(n.id); if (t) cm[nid] = t; } if (n.children && n.children.length) for (const c of n.children) await copy(c); }
+            await copy(node);
+            let targetTree = await App.DB.getMeta(targetWsId) || [];
+            targetTree.push(newTree[0]);
+            await App.DB.importDataBatch(targetTree, cm, targetWsId);
+            App.UI.showToast("已复制到: " + (App.State.workspaces.find(w=>w.id===targetWsId)||{}).name);
+        }
+    },
+
+    async init() {
+        try {
+            await App.DB.init();
+            await App.Workspace.init();
+            App.Tree.render();
+            this.setupEventListeners();
+            setInterval(() => App.Editor.forceSaveContent(), 5000);
+            document.addEventListener('visibilitychange', async () => { if (document.visibilityState === 'hidden') await App.Editor.forceSaveContent(); else { App.State.rootData = await App.DB.getMeta(App.State.currentWorkspaceId) || []; App.Tree.render(); } });
+            window.addEventListener('pagehide', () => App.Editor.forceSaveContent());
+            App.UI.showToast("灵记V5加载完成！工作区: " + App.Workspace.getCurrentName());
+        } catch(e) { alert("加载失败: " + e.message); } finally { document.getElementById('loadingOverlay').style.display = 'none'; }
+    },
+
+    setupEventListeners() {
+        const editor = document.getElementById('mainEditor');
+        editor.addEventListener('input', () => {
+            App.State.isDirty = true; App.Editor.updateStats(); App.UI.setText('saveStatus', "未保存");
+            if (App.State.typingTimer) clearTimeout(App.State.typingTimer);
+            App.State.typingTimer = setTimeout(async () => { App.Editor.pushHistory(editor.value); await App.Editor.forceSaveContent(); await App.Backup.saveTimeBasedBackupIfNecessary(); }, 1000);
+            // V5: 检测@AI触发
+            App.Editor.checkAITrigger();
+        });
+        editor.addEventListener('keydown', e => { if (e.key === 'Tab') { e.preventDefault(); const s = editor.selectionStart; editor.value = editor.value.substring(0,s) + '    ' + editor.value.substring(editor.selectionEnd); editor.selectionStart = editor.selectionEnd = s + 4; App.State.isDirty = true; } });
+        editor.addEventListener('click', () => { App.State.lastCursor = editor.selectionStart; App.Editor.updateStats(); });
+        const menu = document.getElementById('contextMenu');
+        editor.addEventListener('dblclick', e => { App.State.lastCursor = editor.selectionStart; editor.blur(); let x = e.clientX, y = e.clientY; if (x + 220 > window.innerWidth) x -= 230; if (y + 280 > window.innerHeight) y -= 290; menu.style.left = x + 'px'; menu.style.top = y + 'px'; menu.style.display = 'flex'; });
+        document.addEventListener('click', e => { if (!menu.contains(e.target)) menu.style.display = 'none'; });
+
+        // 文件导入
+        document.getElementById('fileInput').addEventListener('change', async function(e) {
+            const f = e.target.files[0]; if (!f) return;
+            const dateStr = new Date().toLocaleDateString('zh-CN').replace(/\//g, '-');
+            const wsName = "导入-" + f.name.replace(/\.(txt|md|html|docx)$/i,'').substring(0,20) + "-" + dateStr;
+            const newWs = await App.Workspace.create(wsName);
+            App.State.pendingImportWsId = newWs.id; App.State.pendingImportFile = f;
+            if (f.name.endsWith('.html')) {
+                App.UI.show('loadingOverlay', true);
+                try {
+                    const text = await f.text(); let parsed = false;
+                    // V5格式
+                    let si = text.indexOf('var BD=');
+                    if (si !== -1) { try { const rest = text.substring(si + 7); const ei = rest.indexOf(';'); if (ei !== -1) { const data = JSON.parse(rest.substring(0, ei)); if (data.tree && data.contents) { await App.DB.importDataBatch(data.tree, data.contents, newWs.id); if (data.workspaceName) { newWs.name = data.workspaceName; await App.DB.saveWorkspace(newWs); App.Workspace.renderSelector(); } await App.Workspace.switchWorkspace(newWs.id); parsed = true; } } } catch(e) {} }
+                    // 旧版格式
+                    if (!parsed) { si = text.indexOf('const embeddedBackup = '); if (si !== -1) { try { const rest = text.substring(si + 23); let depth = 0, ei = -1; for (let i = 0; i < rest.length; i++) { if (rest[i]==='{') depth++; else if (rest[i]==='}') { depth--; if (depth===0) { ei = i+1; break; } } } if (ei !== -1) { const data = JSON.parse(rest.substring(0,ei)); if (data.tree && data.contents) { await App.DB.importDataBatch(data.tree, data.contents, newWs.id); await App.Workspace.switchWorkspace(newWs.id); parsed = true; } } } catch(e) {} } }
+                    if (!parsed) { App.State.pendingRawContent = text; App.UI.setText('importFileName', "HTML: " + f.name); App.UI.setText('importWsName', "导入到: " + wsName); App.UI.show('importSettingModal', true); }
+                } catch(e) { alert("读取失败"); } finally { App.UI.show('loadingOverlay', false); }
+            } else if (f.name.endsWith('.docx')) {
+                App.UI.show('loadingOverlay', true);
+                mammoth.extractRawText({arrayBuffer: await f.arrayBuffer()}).then(r => { App.State.pendingRawContent = r.value; App.UI.setText('importFileName', "Word: " + f.name); App.UI.setText('importWsName', "导入到: " + wsName); App.UI.show('loadingOverlay', false); App.UI.show('importSettingModal', true); }).catch(e => { alert("Word解析失败"); App.UI.show('loadingOverlay', false); });
+            } else {
+                App.State.pendingRawContent = await f.text(); App.UI.setText('importFileName', "文本: " + f.name); App.UI.setText('importWsName', "导入到: " + wsName); App.UI.show('importSettingModal', true);
+            }
+            this.value = '';
+        });
+
+        // 页字数
+        document.getElementById('pageSize').addEventListener('input', function() { if (App.State.pageSizeTimer) clearTimeout(App.State.pageSizeTimer); const v = parseInt(this.value) || 2200; if (App.State.currentNodeId && v !== App.State.lastPageSizeValue) App.State.pageSizeTimer = setTimeout(() => { App.Editor.reformatBook(); App.State.lastPageSizeValue = v; }, 800); });
+
+        // 浮动按钮
+        const btnV = document.getElementById('btnV');
+        btnV.addEventListener('mousedown', () => App.Actions.startPress(App.Actions.handleClickV));
+        btnV.addEventListener('touchstart', () => App.Actions.startPress(App.Actions.handleClickV));
+        btnV.addEventListener('click', () => App.Actions.handleClickV(false));
+        btnV.addEventListener('mouseup', () => App.Actions.endPress());
+        btnV.addEventListener('touchend', () => App.Actions.endPress());
+        const btnAdd = document.getElementById('btnAdd');
+        btnAdd.addEventListener('mousedown', () => App.Actions.startPress(App.Actions.handleClickAdd));
+        btnAdd.addEventListener('touchstart', () => App.Actions.startPress(App.Actions.handleClickAdd));
+        btnAdd.addEventListener('click', () => App.Actions.handleClickAdd(false));
+        btnAdd.addEventListener('mouseup', () => App.Actions.endPress());
+        btnAdd.addEventListener('touchend', () => App.Actions.endPress());
+        document.getElementById('btnMinus').addEventListener('dragover', e => { if (App.State.draggedNodeId) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; } });
+        document.getElementById('btnMinus').addEventListener('drop', e => { e.preventDefault(); App.Tree.deleteNodeByDrag(); });
+        App.Tree.setupDirectoryDrop();
+
+        // 工作区
+        document.getElementById('workspaceSelect').addEventListener('change', function() { App.Workspace.switchWorkspace(this.value); });
+        document.getElementById('btnWsNew').addEventListener('click', async () => { const n = prompt("新工作区名称:"); if (n) { const ws = await App.Workspace.create(n); await App.Workspace.switchWorkspace(ws.id); } });
+        document.getElementById('btnWsManage').addEventListener('click', () => { App.Workspace.renderManageList(); App.UI.show('workspaceModal', true); });
+        document.getElementById('workspaceList').addEventListener('click', async (e) => {
+            if (e.target.dataset.wsRename) { const ws = App.State.workspaces.find(w=>w.id===e.target.dataset.wsRename); if (ws) { App.State.renamingWorkspaceId = ws.id; document.getElementById('renameWsInput').value = ws.name; App.UI.show('renameWsModal', true); } }
+            if (e.target.dataset.wsDelete && confirm("确定删除此工作区？")) { await App.Workspace.deleteWs(e.target.dataset.wsDelete); App.Workspace.renderManageList(); }
+        });
+
+        // 全局事件委托
+        document.addEventListener('click', (e) => {
+            const action = e.target.dataset.action; if (!action) return;
+            const param = e.target.dataset.param, close = e.target.dataset.close;
+            if (close) App.UI.closeModal(close);
+            switch(action) {
+                case 'closeEditor': App.Editor.closeEditor(); break;
+                case 'editorUndo': App.Editor.editorUndo(); break;
+                case 'editorRedo': App.Editor.editorRedo(); break;
+                case 'showFindReplaceModal': App.UI.showFindReplaceModal(); break;
+                case 'prevPage': App.Editor.prevPage(); break;
+                case 'nextPage': App.Editor.nextPage(); break;
+                case 'jumpToPage': App.Editor.jumpToPage(); break;
+                case 'execAction': App.Editor.execAction(param); break;
+                case 'findText': App.Editor.findText(); break;
+                case 'navigateMatch': App.Editor.navigateMatch(parseInt(param)); break;
+                case 'replaceOne': App.Editor.replaceOne(); break;
+                case 'replaceAll': App.Editor.replaceAll(); break;
+                case 'closeModal': App.UI.closeModal(param); break;
+                case 'createManualBackup': App.Backup.createManualBackup(); break;
+                case 'triggerImport': App.ImportExport.triggerImport(); break;
+                case 'exportManager': App.UI.exportManager(); break;
+                case 'doExport': App.ImportExport.doExport(param); break;
+                case 'confirmImport': App.ImportExport.confirmImport(); break;
+                case 'cancelImport': App.ImportExport.cancelImport(); break;
+                case 'handleClickV': App.Actions.handleClickV(false); break;
+                case 'handleClickAdd': App.Actions.handleClickAdd(false); break;
+                case 'showCopyToWsModal': App.UI.showCopyToWsModal(); break;
+                case 'showAIPrompt': App.AI.showPromptModal(param || 'insert'); break;
+                case 'aiQuickCmd': document.getElementById('aiPromptInput').value = param; break;
+                case 'aiSend': App.AI.send(); break;
+                case 'showAISettings': App.AI.loadSettingsToUI(); App.UI.show('aiSettingsModal', true); break;
+                case 'saveAISettings': App.AI.saveSettings(document.getElementById('aiEndpoint').value.trim(), document.getElementById('aiModel').value, document.getElementById('aiApiKey').value.trim()); break;
+                case 'createNewWorkspace': (async()=>{const n=prompt("新工作区名称:");if(n){await App.Workspace.create(n);App.Workspace.renderManageList();}})(); break;
+                case 'confirmRenameWs': (async()=>{const n=document.getElementById('renameWsInput').value.trim();if(n&&App.State.renamingWorkspaceId){await App.Workspace.rename(App.State.renamingWorkspaceId,n);App.Workspace.renderManageList();App.UI.closeModal('renameWsModal');}})(); break;
+                case 'loadAndRestoreBackup': if(confirm("确定恢复？")) App.Backup.loadAndRestoreBackup(parseInt(e.target.dataset.timestamp)); break;
+            }
+        });
+    }
+};
+
+document.body.onload = () => App.init();
+</script>
+</body>
+</html>
